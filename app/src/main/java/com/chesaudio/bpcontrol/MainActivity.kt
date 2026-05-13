@@ -54,6 +54,7 @@ import kotlinx.coroutines.withContext
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
+import kotlin.jvm.java
 import kotlin.math.abs
 
 @Suppress("DEPRECATION")
@@ -137,6 +138,20 @@ class MainActivity : AppCompatActivity() {
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         uri?.let { saveSettingsToFile() }
+    }
+
+    private val requestCameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+        if (isGranted) startScanner() else Toast.makeText(this, "Camera required", Toast.LENGTH_SHORT).show()
+    }
+
+    private val scanLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            result.data?.getStringExtra("QR_CONTENT")?.let { applyEqData(it) }
+        }
+    }
+
+    private fun startScanner() {
+        scanLauncher.launch(Intent(this, ScannerActivity::class.java))
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -749,6 +764,14 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnImport)?.setOnClickListener { importLauncher.launch("*/*") }
         findViewById<Button>(R.id.btnExport)?.setOnClickListener { exportLauncher.launch("BP_Preset.txt") }
+
+        findViewById<Button>(R.id.btnScanQR)?.setOnClickListener {
+            if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                startScanner()
+            } else {
+                requestCameraPermission.launch(android.Manifest.permission.CAMERA)
+            }
+        }
     }
 
     private fun sendFilterUpdate(index: Int, filter: FilterBand, autoLatch: Boolean = true) {
@@ -1118,93 +1141,100 @@ class MainActivity : AppCompatActivity() {
         override fun getItemCount() = bands.size
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
     @SuppressLint("NotifyDataSetChanged")
+    private fun applyEqData(data: String) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                // 1. Safe State Lockout
+                isSyncing = true
+                isMassPushing = true
+
+                val lines = data.split("\n")
+                val tempBands = mutableListOf<FilterBand>()
+
+                lines.take(100).forEach { rawLine ->
+                    val line = rawLine.trim().uppercase()
+
+                    if (line.startsWith("FILTER") && tempBands.size < 10) {
+                        val fcMatch = Regex("FC\\s*[:=]?\\s*([\\d.]+)").find(line)
+                        val gainMatch = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)").find(line)
+                        val qMatch = Regex("Q\\s*[:=]?\\s*([\\d.]+)").find(line)
+
+                        if (fcMatch != null) {
+                            val f = fcMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
+                            val g = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
+                            val q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
+                            val t = if (line.contains("LS")) "LS" else if (line.contains("HS")) "HS" else "PK"
+                            val en = !line.contains("OFF")
+
+                            tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
+                        }
+                    }
+                }
+
+                if (tempBands.isEmpty()) {
+                    withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "No valid EQ filters found", Toast.LENGTH_LONG).show() }
+                    return@launch
+                }
+
+                withContext(Dispatchers.Main) {
+                    val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+                    for (i in 0 until 10) {
+                        if (i < tempBands.size) {
+                            val src = tempBands[i]
+                            eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; this.q = src.q }
+                        } else {
+                            eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
+                        }
+                    }
+
+                    findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
+                    findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                        this.bands = eqBands.map { it.copy() }
+                        val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+                        this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
+                        this.pathDirty = true
+                        this.postInvalidate()
+                    }
+                }
+
+                eqBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
+                latchSettings()
+
+                // STABILITY FIX: Added connection safety check and timeout mechanism
+                var timeoutCounter = 0
+                while ((!commandQueue.isEmpty || isQueueActive) && usbConnection != null && timeoutCounter < 60) {
+                    delay(50)
+                    timeoutCounter++ // Force-exit after ~3 seconds even if queue is jammed
+                }
+                delay(100)
+
+                withContext(Dispatchers.Main) {
+                    debouncedSaveToFlash()
+                    Toast.makeText(this@MainActivity, "EQ Import Successful", Toast.LENGTH_SHORT).show()
+                }
+
+            } catch (e: Exception) {
+                Log.e("EQ", "Parsing/Import Error", e)
+                withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Error applying EQ data", Toast.LENGTH_LONG).show() }
+            } finally {
+                // STABILITY FIX: Guaranteed UI Unlock regardless of crashes or disconnections
+                withContext(Dispatchers.Main) {
+                    isMassPushing = false
+                    isSyncing = false
+                }
+            }
+        }
+    }
+
     private fun parseAutoEq(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                    val lines = reader.readLines()
-
-                    val tempBands = mutableListOf<FilterBand>()
-
-                    lines.take(100).forEach { rawLine ->
-                        val line = rawLine.trim().uppercase()
-
-                        if (line.startsWith("FILTER") && tempBands.size < 10) {
-                            // CRITICAL FIX 1: Added [:=]? to safely parse colons, equals, or spaces
-                            val fcMatch = Regex("FC\\s*[:=]?\\s*([\\d.]+)").find(line)
-                            val gainMatch = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)").find(line)
-                            val qMatch = Regex("Q\\s*[:=]?\\s*([\\d.]+)").find(line)
-
-                            if (fcMatch != null) {
-                                val f = fcMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
-                                val g = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
-                                val q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
-                                val t = if (line.contains("LS")) "LS" else if (line.contains("HS")) "HS" else "PK"
-
-                                // CRITICAL FIX 2: Assume band is ON unless explicitly disabled
-                                val en = !line.contains("OFF")
-
-                                tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
-                            }
-                        }
-                    }
-
-                    if (tempBands.isEmpty()) {
-                        withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "Error: No valid AutoEQ filters found", Toast.LENGTH_LONG).show()
-                        }
-                        return@launch
-                    }
-
-                    withContext(Dispatchers.Main) {
-                        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-                        for (i in 0 until 10) {
-                            if (i < tempBands.size) {
-                                val src = tempBands[i]
-                                eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; this.q = src.q }
-                            } else {
-                                eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
-                            }
-                        }
-
-                        findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
-                        findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                            this.bands = eqBands.map { it.copy() }
-                            val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-                            this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
-                            this.pathDirty = true
-                            this.postInvalidate()
-                        }
-                    }
-
-                    isSyncing = true
-                    isMassPushing = true
-
-                    eqBands.forEachIndexed { index, band ->
-                        sendFilterUpdate(index, band, autoLatch = false)
-                    }
-                    latchSettings()
-
-                    // CRITICAL FIX 3: Bulletproof Deterministic Wait.
-                    // Wait until the buffer is empty AND the processor has fully finished execution delays
-                    while (!commandQueue.isEmpty || isQueueActive) {
-                        delay(50)
-                    }
-                    delay(100) // Small safety buffer
-
-                    withContext(Dispatchers.Main) {
-                        isMassPushing = false
-                        isSyncing = false
-                        debouncedSaveToFlash()
-                        Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
-                    }
+                    applyEqData(reader.readText())
                 }
             } catch (_: Exception) {
-                withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "File Error: Could not read file", Toast.LENGTH_LONG).show()
-                }
+                withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "File Error: Could not read file", Toast.LENGTH_LONG).show() }
             }
         }
     }

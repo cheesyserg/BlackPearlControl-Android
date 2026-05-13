@@ -37,6 +37,14 @@ android {
 }
 
 dependencies {
+    // --- QR SCANNING ADDITIONS ---
+    val cameraxVersion = "1.4.0" // Stable for 2026 targetSdk 36
+    implementation("androidx.camera:camera-camera2:$cameraxVersion")
+    implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-view:$cameraxVersion")
+
+    // ML Kit Barcode Scanning
+    implementation("com.google.android.gms:play-services-mlkit-barcode-scanning:18.3.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.android.material:material:1.12.0")

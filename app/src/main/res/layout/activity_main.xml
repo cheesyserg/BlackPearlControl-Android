@@ -218,6 +218,13 @@
                             android:text="@string/export_preset" />
 
                         <Button
+                            android:id="@+id/btnScanQR"
+                            style="?android:attr/buttonBarButtonStyle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Scan QR" />
+
+                        <Button
                             android:id="@+id/btnPresets"
                             style="?android:attr/buttonBarButtonStyle"
                             android:layout_width="wrap_content"

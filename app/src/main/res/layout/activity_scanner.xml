@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#000000">
+
+    <androidx.camera.view.PreviewView
+        android:id="@+id/previewView"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <Space
+        android:id="@+id/scanTarget"
+        android:layout_width="260dp"
+        android:layout_height="260dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintVertical_bias="0.4" />
+
+    <View android:layout_width="0dp" android:layout_height="0dp" android:background="#B3000000" app:layout_constraintBottom_toTopOf="@id/scanTarget" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="parent" />
+    <View android:layout_width="0dp" android:layout_height="0dp" android:background="#B3000000" app:layout_constraintBottom_toBottomOf="parent" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toBottomOf="@id/scanTarget" />
+    <View android:layout_width="0dp" android:layout_height="0dp" android:background="#B3000000" app:layout_constraintBottom_toBottomOf="@id/scanTarget" app:layout_constraintEnd_toStartOf="@id/scanTarget" app:layout_constraintStart_toStartOf="parent" app:layout_constraintTop_toTopOf="@id/scanTarget" />
+    <View android:layout_width="0dp" android:layout_height="0dp" android:background="#B3000000" app:layout_constraintBottom_toBottomOf="@id/scanTarget" app:layout_constraintEnd_toEndOf="parent" app:layout_constraintStart_toEndOf="@id/scanTarget" app:layout_constraintTop_toTopOf="@id/scanTarget" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="0dp"
+        android:background="@drawable/qr_border"
+        app:layout_constraintBottom_toBottomOf="@id/scanTarget"
+        app:layout_constraintEnd_toEndOf="@id/scanTarget"
+        app:layout_constraintStart_toStartOf="@id/scanTarget"
+        app:layout_constraintTop_toTopOf="@id/scanTarget" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="32dp"
+        android:text="Align QR Code within the frame"
+        android:textColor="#FFFFFF"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:shadowColor="#000000"
+        android:shadowRadius="4"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/scanTarget" />
+
+    <ImageButton
+        android:id="@+id/btnClose"
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_margin="16dp"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:src="@android:drawable/ic_menu_close_clear_cancel"
+        app:tint="#FFFFFF"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
